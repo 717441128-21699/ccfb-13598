@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>睡眠呼吸暂停初筛 · 医生工作台</title>
+<style>
+:root{
+  --bg:#0f1419; --panel:#171e26; --panel2:#1f2833; --line:#2b3642;
+  --fg:#e6edf3; --muted:#8b98a5; --accent:#4dabf7; --warn:#ffa94d;
+  --danger:#ff6b6b; --ok:#51cf66; --partner:#cc5de8; --ac:#fab005;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+header{padding:16px 24px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;font-weight:600}
+main{max-width:1180px;margin:0 auto;padding:24px;display:grid;gap:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px}
+.card h2{font-size:15px;margin:0 0 14px;color:var(--accent);font-weight:600}
+.row{display:flex;gap:16px;flex-wrap:wrap}
+.row>.card{flex:1;min-width:280px}
+input[type=file]{color:var(--muted);max-width:100%}
+button{background:var(--accent);color:#08121b;border:0;border-radius:6px;
+  padding:9px 18px;font-weight:600;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+.muted{color:var(--muted)}
+.metric{display:grid;gap:4px}
+.metric .v{font-size:30px;font-weight:700}
+.metric .k{color:var(--muted);font-size:12px}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
+.b-none{background:#2f3e4e;color:#a5d8ff}
+.b-mild{background:#143d2a;color:#69db7c}
+.b-moderate{background:#4d3812;color:#ffd43b}
+.b-severe{background:#4d1618;color:#ff8787}
+.b-low{background:#3a2c12;color:#ffc078}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:7px 9px;text-align:left;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600}
+canvas{width:100%;height:170px;display:block;background:#0c1116;border-radius:8px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--muted)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.clip{display:flex;align-items:center;gap:12px;padding:9px 4px;border-bottom:1px solid var(--line)}
+.clip audio{height:34px}
+.clip .meta{flex:1;min-width:0}
+.spinner{display:inline-block;width:15px;height:15px;border:2px solid var(--muted);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:7px}
+@keyframes spin{to{transform:rotate(360deg)}}
+#status{color:var(--muted)}
+.err{color:var(--danger);white-space:pre-wrap}
+.pill{font-size:11px;padding:1px 7px;border-radius:10px;background:var(--panel2);color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>睡眠呼吸暂停初筛 · 医生工作台</h1>
+  <span class="pill">手机整夜录音 · 鼾声/体位/AHI 分析</span>
+</header>
+<main>
+  <section class="card">
+    <h2>1. 上传整夜录音</h2>
+    <div class="row" style="align-items:flex-end">
+      <div>
+        <label class="muted">录音文件（WAV，建议 16kHz 单声道，最长 8 小时）</label><br>
+        <input id="wav" type="file" accept=".wav,audio/wav">
+      </div>
+      <div>
+        <label class="muted">体位元数据（可选，JSON：positions 数组）</label><br>
+        <input id="pos" type="file" accept=".json,application/json">
+      </div>
+      <button id="uploadBtn">上传并分析</button>
+    </div>
+    <p id="status" style="margin:12px 0 0"></p>
+    <p id="error" class="err"></p>
+  </section>
+
+  <div id="result" hidden>
+    <div class="row">
+      <section class="card metric"><span class="k">估算 AHI（次/小时）</span>
+        <span class="v" id="ahiVal">–</span></section>
+      <section class="card metric"><span class="k">严重程度分级</span>
+        <span class="v" style="font-size:22px;padding-top:6px"><span id="sevBadge" class="badge">–</span></span></section>
+      <section class="card metric"><span class="k">检出暂停 / 喘气确认</span>
+        <span class="v" style="font-size:24px;padding-top:4px"><span id="apneaN">–</span></span></section>
+      <section class="card metric"><span class="k">录音时长 · 分析耗时</span>
+        <span class="v" style="font-size:20px;padding-top:6px"><span id="durN">–</span></span></section>
+    </div>
+
+    <section class="card" style="margin-top:20px">
+      <h2>2. 整夜声音能量与鼾声分布（每点 1 秒，可点击/缩放）</h2>
+      <canvas id="wave" width="1140" height="170"></canvas>
+      <div class="legend">
+        <span><i class="dot" style="background:#4dabf7"></i>声音能量 dBFS</span>
+        <span><i class="dot" style="background:var(--ok)"></i>病人鼾声</span>
+        <span><i class="dot" style="background:var(--partner)"></i>同屋鼾声（已剔除）</span>
+        <span><i class="dot" style="background:var(--ac)"></i>空调/稳态噪声</span>
+        <span><i class="dot" style="background:var(--danger)"></i>憋气暂停</span>
+      </div>
+      <p class="muted" style="margin-bottom:0">点击图表定位，鼠标滚轮以光标为中心缩放，双击复位。</p>
+    </section>
+
+    <div class="row" style="margin-top:20px">
+      <section class="card">
+        <h2>3. 分时段统计（每小时）</h2>
+        <table id="hourlyTable"><thead><tr>
+          <th>小时</th><th>病人鼾声</th><th>同屋鼾声</th><th>暂停</th><th>平均 dB</th><th>空调(秒)</th>
+        </tr></thead><tbody></tbody></table>
+      </section>
+      <section class="card">
+        <h2>4. 分体位统计</h2>
+        <table id="posTable"><thead><tr>
+          <th>体位</th><th>占比</th><th>病人鼾(秒)</th><th>同屋鼾(秒)</th><th>暂停</th>
+        </tr></thead><tbody></tbody></table>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:20px">
+      <h2>5. 憋气最长的十段（可直接试听）</h2>
+      <div id="clips"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let CURRENT = null, VIEW = null;
+
+async function upload(){
+  const wav = $('wav').files[0], pos = $('pos').files[0];
+  $('error').textContent = '';
+  if(!wav){ $('error').textContent='请先选择 WAV 录音文件'; return; }
+  const fd = new FormData();
+  fd.append('file', wav);
+  if(pos) fd.append('position_file', pos);
+  $('uploadBtn').disabled = true;
+  $('status').innerHTML = '<span class="spinner"></span>正在上传…';
+  try{
+    const r = await fetch('/api/jobs', {method:'POST', body:fd});
+    if(!r.ok) throw new Error((await r.json()).detail || r.status);
+    const job = await r.json();
+    poll(job.job_id);
+  }catch(e){
+    $('error').textContent = '上传失败：' + e.message;
+    $('status').textContent=''; $('uploadBtn').disabled=false;
+  }
+}
+
+async function poll(id){
+  const r = await fetch('/api/jobs/'+id);
+  const job = await r.json();
+  if(job.status==='queued'||job.status==='processing'){
+    $('status').innerHTML = '<span class="spinner"></span>正在分析整夜录音…（状态：'+job.status+'）';
+    setTimeout(()=>poll(id), 1500);
+  }else if(job.status==='error'){
+    $('status').textContent=''; $('error').textContent='分析失败：'+job.error;
+    $('uploadBtn').disabled=false;
+  }else{
+    $('status').textContent='分析完成。'; $('uploadBtn').disabled=false;
+    render(job.result);
+  }
+}
+
+function render(d){
+  CURRENT = d; $('result').hidden = false;
+  $('ahiVal').textContent = d.ahi.ahi;
+  const sev = d.ahi.severity, map={none:['无呼吸暂停','b-none'],mild:['轻度','b-mild'],
+    moderate:['中度','b-moderate'],severe:['重度','b-severe']};
+  const badge=$('sevBadge'); badge.textContent=map[sev][0]; badge.className='badge '+map[sev][1];
+  $('apneaN').textContent = d.ahi.apnea_count + ' / ' + d.ahi.gasp_confirmed;
+  const h=Math.floor(d.duration/3600), m=Math.round(d.duration%3600/60);
+  $('durN').textContent = h+'h'+m+'m · '+d.processing_seconds+'s（'+d.realtime_factor+'× 实时）';
+  if(d.ahi.confidence==='low'){
+    $('sevBadge').insertAdjacentHTML('afterend',
+      ' <span class="badge b-low">低置信度</span>');
+  }
+
+  // hourly
+  $('hourlyTable').querySelector('tbody').innerHTML = d.hourly.map(r=>`<tr>
+    <td>第${r.hour+1}小时</td><td>${r.patient_snores}</td><td>${r.partner_snores}</td>
+    <td>${r.apneas}</td><td>${r.mean_db??'–'}</td><td>${r.ac_seconds}</td></tr>`).join('');
+  // positions
+  $('posTable').querySelector('tbody').innerHTML = d.positions.map(r=>`<tr>
+    <td>${r.position_label}</td><td>${r.pct}%</td>
+    <td>${r.patient_snore_seconds}</td><td>${r.partner_snore_seconds}</td>
+    <td>${r.apnea_count}</td></tr>`).join('');
+  // clips
+  $('clips').innerHTML = d.clips.length ? d.clips.map(c=>`<div class="clip">
+    <strong>#${c.index}</strong>
+    <div class="meta">${fmt(c.start)} – ${fmt(c.end)} ｜ 暂停 ${c.apnea_duration}s
+      ${c.confirmed_by_gasp?'<span class="badge b-mild">喘气确认</span>':'<span class="badge b-none">静默型</span>'}</div>
+    <audio controls preload="none" src="${c.url}"></audio></div>`).join('')
+    : '<p class="muted">未检出达到阈值的憋气片段。</p>';
+
+  VIEW = {start:0, end:d.envelope.seconds};
+  drawWave();
+}
+
+function fmt(s){const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=Math.floor(s%60);
+  return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(x).padStart(2,'0');}
+
+function drawWave(){
+  const d=CURRENT, cv=$('wave'), ctx=cv.getContext('2d');
+  const W=cv.width,H=cv.height, env=d.envelope, N=env.seconds;
+  ctx.clearRect(0,0,W,H);
+  const vs=VIEW.start, ve=VIEW.end, span=Math.max(1,ve-vs), toX=t=>(t-vs)/span*W;
+  const vals=env.db.map(v=>v??-60);
+  const dmin=Math.min(...vals), dmax=Math.max(...vals);
+  const toY=db=>H-8-(db-dmin)/Math.max(1,dmax-dmin)*(H-26);
+  // grid
+  ctx.strokeStyle='#1b2530'; ctx.lineWidth=1; ctx.beginPath();
+  for(let g=0;g<=4;g++){const y=10+g*(H-26)/4;ctx.moveTo(0,y);ctx.lineTo(W,y);}
+  ctx.stroke();
+  // dB line
+  ctx.strokeStyle='#4dabf7'; ctx.lineWidth=1.2; ctx.beginPath();
+  for(let t=Math.floor(vs);t<ve&&t<N;t++){const x=toX(t),y=toY(env.db[t]??dmin);
+    t===Math.floor(vs)?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+  ctx.stroke();
+  // event markers (thin vertical spans)
+  function marks(arr,color){ctx.fillStyle=color;
+    for(let t=Math.floor(vs);t<ve&&t<N;t++){if(arr[t]){const x=toX(t);ctx.fillRect(x,H-16,Math.max(1,W/span),6);}}}
+  marks(env.ac,'#fab005'); marks(env.partner_snore,'#cc5de8'); marks(env.patient_snore,'#51cf66');
+  // apnea spans
+  ctx.fillStyle='rgba(255,107,107,.28)';
+  d.apneas.forEach(a=>{if(a.end<vs||a.start>ve)return;
+    ctx.fillRect(toX(Math.max(vs,a.start)),0,Math.max(2,toX(Math.min(ve,a.end))-toX(Math.max(vs,a.start))),H);});
+  // time axis
+  ctx.fillStyle='#8b98a5'; ctx.font='11px sans-serif';
+  const ticks=8;
+  for(let i=0;i<=ticks;i++){const t=vs+span*i/ticks,x=toX(t);
+    ctx.fillText(fmt(t),Math.min(x,W-44),H-1);}
+}
+
+$('wave').addEventListener('wheel',e=>{
+  if(!CURRENT)return; e.preventDefault();
+  const N=CURRENT.envelope.seconds, rect=e.target.getBoundingClientRect();
+  const frac=(e.clientX-rect.left)/rect.width, t=VIEW.start+(VIEW.end-VIEW.start)*frac;
+  const factor=e.deltaY>0?1.25:0.8, span=Math.max(30,Math.min(N,(VIEW.end-VIEW.start)*factor));
+  VIEW.start=Math.max(0,Math.min(t-span*frac,N-span));
+  VIEW.end=Math.min(N,VIEW.start+span); drawWave();
+},{passive:false});
+$('wave').addEventListener('dblclick',()=>{if(CURRENT){VIEW={start:0,end:CURRENT.envelope.seconds};drawWave();}});
+$('uploadBtn').addEventListener('click',upload);
+</script>
+</body>
+</html>
